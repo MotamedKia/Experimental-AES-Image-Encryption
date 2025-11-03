@@ -2,7 +2,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>AES Image Encryptor (Demo)</title>
+  <title>AES Image Encryptor — Demo (client-side)</title>
   <style>
     body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;display:flex;flex-direction:column;gap:12px;align-items:center;padding:18px}
     .row{display:flex;gap:12px;align-items:center}
@@ -36,10 +36,12 @@
       <canvas id="cipher" width="320" height="240"></canvas>
     </div>
   </div>  <div>
+    <div style="font-weight:600">Plaintext (Base64, RGBA bytes):</div>
+    <textarea id="plainOut" readonly></textarea>
+  </div>  <div>
     <div style="font-weight:600">Ciphertext (Base64, includes salt+iv+cipher):</div>
     <textarea id="out" readonly></textarea>
   </div>  <script>
-    // Utility helpers
     const fileInput = document.getElementById('file');
     const passwordInput = document.getElementById('password');
     const plainCanvas = document.getElementById('plain');
@@ -48,16 +50,16 @@
     const decryptBtn = document.getElementById('decrypt');
     const downloadBtn = document.getElementById('download');
     const out = document.getElementById('out');
+    const plainOut = document.getElementById('plainOut');
 
-    let originalImageData = null; // Uint8ClampedArray
-    let saved = null; // object to keep salt, iv, ciphertext (ArrayBuffer)
+    let originalImageData = null;
+    let saved = null;
 
     function readImageFile(file){
       return new Promise((res,rej)=>{
         const img = new Image();
         img.onload = ()=>{
           const ctx = plainCanvas.getContext('2d');
-          // fit canvas to image (keeping max 320 width)
           const maxW = 320; const scale = Math.min(1, maxW / img.width);
           plainCanvas.width = Math.round(img.width * scale);
           plainCanvas.height = Math.round(img.height * scale);
@@ -98,6 +100,7 @@
       }
       return btoa(binary);
     }
+
     function base64ToAb(b64){
       const binary = atob(b64);
       const len = binary.length;
@@ -110,7 +113,8 @@
       const file = e.target.files?.[0];
       if (!file) return;
       await readImageFile(file);
-      // draw plain already done
+      const base64Plain = abToBase64(originalImageData.buffer);
+      plainOut.value = base64Plain;
       out.value = '';
       decryptBtn.disabled = true;
       downloadBtn.disabled = true;
@@ -119,30 +123,22 @@
     encryptBtn.addEventListener('click', async ()=>{
       if (!originalImageData) return alert('Load an image first');
       const password = passwordInput.value || '';
-      // salt and iv
       const salt = crypto.getRandomValues(new Uint8Array(16));
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const key = await deriveKeyFromPassword(password, salt.buffer);
-      const plaintext = new Uint8Array(originalImageData.buffer); // RGBA bytes
-
-      // AES-GCM encrypt
+      const plaintext = new Uint8Array(originalImageData.buffer);
       const ciphertext = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, plaintext);
-      // Save everything needed to decrypt
       saved = {salt: salt.buffer, iv: iv.buffer, ciphertext};
 
-      // Visualize ciphertext: we will take the ciphertext bytes and map into pixel buffer
       const cipherBytes = new Uint8Array(ciphertext);
-      const renderLen = plaintext.length; // need this many bytes for pixels
-      // if cipher shorter (unlikely), pad with zeros
+      const renderLen = plaintext.length;
       const renderBuf = new Uint8ClampedArray(renderLen);
       for (let i=0;i<renderLen;i++) renderBuf[i] = cipherBytes[i % cipherBytes.length];
 
-      // Put into canvas
       const ctx = cipherCanvas.getContext('2d');
       const imageData = new ImageData(renderBuf, cipherCanvas.width, cipherCanvas.height);
       ctx.putImageData(imageData, 0, 0);
 
-      // Output base64 package: salt||iv||cipher
       const combined = new Uint8Array(salt.byteLength + iv.byteLength + ciphertext.byteLength);
       combined.set(new Uint8Array(salt), 0);
       combined.set(new Uint8Array(iv), salt.byteLength);
@@ -159,7 +155,6 @@
       const key = await deriveKeyFromPassword(password, saved.salt);
       try{
         const plainBuf = await crypto.subtle.decrypt({name:'AES-GCM', iv: saved.iv}, key, saved.ciphertext);
-        // draw restored image to plain canvas
         const ctx = plainCanvas.getContext('2d');
         const id = ctx.getImageData(0,0,plainCanvas.width,plainCanvas.height);
         id.data.set(new Uint8ClampedArray(plainBuf));
@@ -179,6 +174,5 @@
       a.click();
       URL.revokeObjectURL(url);
     });
-
   </script></body>
 </html>
